@@ -1,0 +1,5 @@
+{
+  "name": "Skinnovation - Sephora Portugal",
+  "description": "Tecnologia de análise avançada para descobrir o que a tua pele realmente precisa.",
+  "requestFramePermissions": ["camera"]
+}
