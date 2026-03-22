@@ -298,21 +298,55 @@ function CameraView({ onCapture, onBack }: { onCapture: (img: string) => void, o
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [isInitializing, setIsInitializing] = useState(true);
 
-  useEffect(() => {
-    async function setupCamera() {
-      try {
-        const s = await navigator.mediaDevices.getUserMedia({ 
-          video: { facingMode: 'user', width: 1280, height: 720 } 
-        });
-        setStream(s);
-        if (videoRef.current) videoRef.current.srcObject = s;
-      } catch (err) {
-        console.error("Camera access denied", err);
+  const setupCamera = async () => {
+    setIsInitializing(true);
+    setCameraError(null);
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error("O seu navegador não suporta acesso à câmara.");
+      }
+
+      const constraints = {
+        video: { 
+          facingMode: 'user',
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        }
+      };
+
+      const s = await navigator.mediaDevices.getUserMedia(constraints);
+      setStream(s);
+      if (videoRef.current) {
+        videoRef.current.srcObject = s;
+        // Ensure video plays
+        videoRef.current.onloadedmetadata = () => {
+          videoRef.current?.play().catch(e => console.error("Error playing video:", e));
+        };
+      }
+      setIsInitializing(false);
+    } catch (err: any) {
+      console.error("Camera access error:", err);
+      setIsInitializing(false);
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        setCameraError("Permissão de câmara negada. Por favor, permite o acesso nas definições do teu dispositivo.");
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        setCameraError("Não foi encontrada nenhuma câmara no dispositivo.");
+      } else {
+        setCameraError("Erro ao aceder à câmara: " + (err.message || "Erro desconhecido"));
       }
     }
+  };
+
+  useEffect(() => {
     setupCamera();
-    return () => stream?.getTracks().forEach(t => t.stop());
+    return () => {
+      if (stream) {
+        stream.getTracks().forEach(t => t.stop());
+      }
+    };
   }, []);
 
   const capture = () => {
@@ -322,7 +356,6 @@ function CameraView({ onCapture, onBack }: { onCapture: (img: string) => void, o
       const context = canvas.getContext('2d');
       
       if (context && video.videoWidth > 0) {
-        // Limit max dimension to 800px for faster processing and reliability
         const maxDim = 800;
         let width = video.videoWidth;
         let height = video.videoHeight;
@@ -337,7 +370,6 @@ function CameraView({ onCapture, onBack }: { onCapture: (img: string) => void, o
         canvas.height = height;
         context.drawImage(video, 0, 0, width, height);
         
-        // Use 0.7 quality to keep payload small and avoid "Unable to process input image" errors
         const data = canvas.toDataURL('image/jpeg', 0.7);
         onCapture(data);
       }
@@ -353,64 +385,83 @@ function CameraView({ onCapture, onBack }: { onCapture: (img: string) => void, o
     >
       {/* Header Indicators */}
       <div className="flex justify-between p-6 z-10">
+        <button onClick={onBack} className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center border border-white/10">
+          <ChevronLeft className="w-6 h-6 text-white" />
+        </button>
         <div className="flex items-center gap-2 bg-black/40 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10">
           <Zap className="w-4 h-4 text-green-400 fill-green-400" />
           <span className="text-[10px] font-bold text-white uppercase tracking-wider">Iluminação OK</span>
-        </div>
-        <div className="flex items-center gap-2 bg-black/40 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10">
-          <Maximize className="w-4 h-4 text-green-400" />
-          <span className="text-[10px] font-bold text-white uppercase tracking-wider">Alinhado</span>
         </div>
       </div>
 
       {/* Camera Preview */}
       <div className="relative flex-1 flex items-center justify-center overflow-hidden">
-        <video 
-          ref={videoRef} 
-          autoPlay 
-          playsInline 
-          muted 
-          className="absolute inset-0 w-full h-full object-cover opacity-60 scale-x-[-1]"
-        />
-        
-        {/* Grid Overlay */}
-        <div className="absolute inset-0 opacity-20 pointer-events-none" 
-             style={{ backgroundImage: 'radial-gradient(circle, white 1px, transparent 1px)', backgroundSize: '30px 30px' }} />
-
-        {/* Oval Frame */}
-        <div className="relative w-[80vw] aspect-[3/4] max-w-[300px]">
-          <div className="absolute inset-0 border-2 border-dashed border-white/40 rounded-[100%] flex items-center justify-center">
-             <div className="w-1 h-1 bg-white rounded-full" />
+        {isInitializing && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-white z-20 bg-black">
+            <div className="w-8 h-8 border-2 border-white/20 border-t-white rounded-full animate-spin mb-4" />
+            <p className="text-xs font-bold tracking-widest uppercase">A iniciar câmara...</p>
           </div>
-          
-          {/* Corner Marks */}
-          <div className="absolute -top-4 -left-4 w-8 h-8 border-t-2 border-l-2 border-white/60" />
-          <div className="absolute -top-4 -right-4 w-8 h-8 border-t-2 border-r-2 border-white/60" />
-          <div className="absolute -bottom-4 -left-4 w-8 h-8 border-b-2 border-l-2 border-white/60" />
-          <div className="absolute -bottom-4 -right-4 w-8 h-8 border-b-2 border-r-2 border-white/60" />
-        </div>
+        )}
 
-        <p className="absolute bottom-12 text-white/60 text-xs font-medium px-8 text-center">
-          Mantém o rosto dentro da moldura e evita sombras
-        </p>
+        {cameraError ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-white z-20 bg-black px-8 text-center">
+            <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mb-6">
+              <Camera className="w-8 h-8 text-red-500" />
+            </div>
+            <h3 className="text-lg font-bold mb-2">Acesso à Câmara</h3>
+            <p className="text-sm text-white/60 mb-8 leading-relaxed">
+              {cameraError}
+            </p>
+            <button 
+              onClick={setupCamera}
+              className="bg-white text-black px-8 py-3 rounded-full font-bold text-xs tracking-widest uppercase"
+            >
+              Tentar Novamente
+            </button>
+          </div>
+        ) : (
+          <>
+            <video 
+              ref={videoRef} 
+              autoPlay 
+              playsInline 
+              muted 
+              className="absolute inset-0 w-full h-full object-cover opacity-60 scale-x-[-1]"
+            />
+            
+            {/* Grid Overlay */}
+            <div className="absolute inset-0 opacity-20 pointer-events-none" 
+                 style={{ backgroundImage: 'radial-gradient(circle, white 1px, transparent 1px)', backgroundSize: '30px 30px' }} />
+
+            {/* Oval Frame */}
+            <div className="relative w-[80vw] aspect-[3/4] max-w-[300px]">
+              <div className="absolute inset-0 border-2 border-dashed border-white/40 rounded-[100%] flex items-center justify-center">
+                 <div className="w-1 h-1 bg-white rounded-full" />
+              </div>
+              
+              {/* Corner Marks */}
+              <div className="absolute -top-4 -left-4 w-8 h-8 border-t-2 border-l-2 border-white/60" />
+              <div className="absolute -top-4 -right-4 w-8 h-8 border-t-2 border-r-2 border-white/60" />
+              <div className="absolute -bottom-4 -left-4 w-8 h-8 border-b-2 border-l-2 border-white/60" />
+              <div className="absolute -bottom-4 -right-4 w-8 h-8 border-b-2 border-r-2 border-white/60" />
+            </div>
+
+            <p className="absolute bottom-12 text-white/60 text-xs font-medium px-8 text-center">
+              Mantém o rosto dentro da moldura e evita sombras
+            </p>
+          </>
+        )}
       </div>
 
       {/* Controls */}
-      <div className="p-10 flex items-center justify-between bg-black/20 backdrop-blur-xl">
-        <button onClick={onBack} className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center border border-white/10">
-          <X className="w-6 h-6 text-white" />
-        </button>
-        
+      <div className="p-10 flex items-center justify-center bg-black/20 backdrop-blur-xl">
         <button 
           onClick={capture}
-          className="w-20 h-20 rounded-full border-4 border-white flex items-center justify-center p-1"
+          disabled={!!cameraError || isInitializing}
+          className={`w-20 h-20 rounded-full border-4 border-white flex items-center justify-center p-1 transition-opacity ${ (cameraError || isInitializing) ? 'opacity-20' : 'opacity-100'}`}
         >
           <div className="w-full h-full rounded-full bg-white" />
         </button>
-
-        <div className="w-12 h-12 flex items-center justify-center">
-          {/* Placeholder for flash/settings */}
-        </div>
       </div>
 
       <canvas ref={canvasRef} className="hidden" />
